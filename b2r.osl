@@ -11,8 +11,8 @@ void covarToEigen2D(float a, float b, float c,
     float del = sqrt(a*a+4*b*b-2*a*c+c*c);
 
     //solve for eigenvalues
-    l1 = .5*(a+c+del);
-    l2 = .5*(a+c-del);
+    l1 = 0.5*(a+c+del);
+    l2 = 0.5*(a+c-del);
 
     //two eigenvectors v1, v2, corresponding to l1, l2, respectively
     v1=vector(0);
@@ -25,6 +25,7 @@ void covarToEigen2D(float a, float b, float c,
     v2[0] = (l2-c)/b;
     v2 = normalize(v2);
 }
+
 void partialDeriv(point Q, float a, float b,
                   output vector dQda, output vector dQdb)
 {
@@ -63,6 +64,7 @@ shader Bump2Roughness
     float bumpNormalGain = 1,
     float anisotropyGain = 1,
     float gain = 1,
+    int invertBumpNormal = 0,
 
 
     output vector resultBumpNormal = normal(0),
@@ -79,7 +81,9 @@ shader Bump2Roughness
 )
 {
      
-        float inputS; float inputT; float textureFilterScale;
+        float inputS = u; 
+        float inputT = v; 
+        float textureFilterScale;
         color deriv1; color deriv2;
 
         point QT = rotate(point(inputS,inputT,0),radians(rotation),point(0,0,0),point(0,0,1)) * frequency;
@@ -97,8 +101,8 @@ shader Bump2Roughness
         vector pPps, pPpt;
         partialDeriv(P, mys, myt, pPps, pPpt);
         //default deriv
-        pPps = dPdu;
-        pPpt = dPdv;
+        //pPps = dPdu;
+        //pPpt = dPdv;
                                 
         float dx=deriv1[1];
         float dy=deriv1[2];
@@ -110,6 +114,10 @@ shader Bump2Roughness
         ch = 5;
         float dxdy  = texture(filename, ulookup, vlookup, "firstchannel", ch);
 
+        if (invertBumpNormal == 0){
+            dx = -dx;
+            dy = -dy;
+        }
         vector PN = cross(pPps,pPpt);
         
         int lefthanded = 0; 
