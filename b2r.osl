@@ -61,6 +61,7 @@ shader Bump2Roughness
     float rotation = 0,
     float baseRoughness = 0.001,
     float bumpNormalGain = 1,
+    float anisotropyGain = 1,
     float gain = 1,
 
 
@@ -81,8 +82,7 @@ shader Bump2Roughness
         float inputS; float inputT; float textureFilterScale;
         color deriv1; color deriv2;
 
-        point QT = rotate(point(inputS,inputT,0),radians(rotation),
-                          point(0,0,0),point(0,0,1)) * frequency;
+        point QT = rotate(point(inputS,inputT,0),radians(rotation),point(0,0,0),point(0,0,1)) * frequency;
         inputS = QT[0];
         inputT = QT[1];
         
@@ -96,6 +96,9 @@ shader Bump2Roughness
                 
         vector pPps, pPpt;
         partialDeriv(P, mys, myt, pPps, pPpt);
+        //default deriv
+        pPps = dPdu;
+        pPpt = dPdv;
                                 
         float dx=deriv1[1];
         float dy=deriv1[2];
@@ -118,13 +121,12 @@ shader Bump2Roughness
         if (lefthanded==1) PN = -PN;
         pPps = normalize(cross(pPpt,PN));
         pPpt = cross(PN,pPps);
-        
+
+        //tangent space;
         if (lefthanded==0) resultBumpNormal = vector(dx*bumpNormalGain, dy*bumpNormalGain, 1);
         else resultBumpNormal = vector(dx*bumpNormalGain, dy*bumpNormalGain, -1);
         
-        resultBumpNormal = pPps*resultBumpNormal[0] 
-                         + pPpt*resultBumpNormal[1]
-                         + PN*resultBumpNormal[2];              //project into P space;
+        resultBumpNormal = pPps*resultBumpNormal[0] + pPpt*resultBumpNormal[1] + PN*resultBumpNormal[2];              //project into P space;
         resultBumpNormal = normalize(resultBumpNormal);
         
         /* core LEADR/Bump Roughness Logic */
@@ -141,7 +143,8 @@ shader Bump2Roughness
 
         vector _pPpu = -pPps*v1[0]+pPpt*v1[1];
         vector _pPpv = -pPps*v2[0]+pPpt*v2[1];
-
+        //_pPpu = dPdu*v1[0]+dPdv*v1[1];
+        //_pPpv = dPdu*v2[0]+dPdv*v2[1];
         float base_roughsqr = baseRoughness*baseRoughness;
 
         float varianceU = l1+base_roughsqr;
@@ -153,7 +156,20 @@ shader Bump2Roughness
         
         float rudivrv = resultRoughnessU/resultRoughnessV;
         resultAnisotropy = (rudivrv-1.0)/(rudivrv+1.0);
+        if (anisotropyGain != 1.0){
+            resultAnisotropy = clamp(resultAnisotropy*anisotropyGain, 
+                                     0.0, 1.0);
+        
+            float _alpha = 1.0/(resultAnisotropy*resultAnisotropy-
+                                2.0*resultAnisotropy+2.0);
+        
+            float variance = varianceU+varianceV;
+            varianceU = variance * _alpha;
+            varianceV = variance *(1.0-_alpha);
             
+            resultRoughnessU = sqrt(varianceU);
+            resultRoughnessV = sqrt(varianceV);
+        }            
         resultRoughness           = resultRoughnessU/(1+resultAnisotropy);
         resultAnisotropyDirection = _pPpu;
         resultHeightMap           = deriv1[0];
