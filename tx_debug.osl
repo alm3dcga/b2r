@@ -1,0 +1,58 @@
+// Lookup a bitmap bitmap with OSL
+// OSLBitmap.osl, by Zap Andersson
+// Modified: 2020-03-24
+// Copyright 2020 Autodesk Inc, All rights reserved. This file is licensed under Apache 2.0 license
+//    https://github.com/ADN-DevTech/3dsMax-OSL-Shaders/blob/master/LICENSE.txt
+
+shader OSLBitmap2
+(  
+  
+  
+  
+  string Filename = "", 
+
+
+    
+  //output color Col = 0,
+  output float R = 0,
+  output float G = 0,
+  output float B = 0,
+  output float A = 1,
+  output float X = 0,
+  output float Y = 0
+)
+{
+        // Skip empty files
+        if (strlen(Filename) == 0)
+                return;
+        point  Pos   = point(u,v,0);
+        float  Scale  = 1.0; 
+        point p = Pos  / Scale;
+
+        // Default lookup, just use u and inverted v...
+        float ulookup = p[0];
+        float vlookup = 1.0 - p[1];
+        
+
+
+        color Col  = texture(Filename, ulookup, vlookup);
+
+        int ch = 3;
+        A  = texture(Filename, ulookup, vlookup, "firstchannel", ch);
+        ch = 4;
+        X  = texture(Filename, ulookup, vlookup, "firstchannel", ch);
+        ch = 5;
+        Y  = texture(Filename, ulookup, vlookup, "firstchannel", ch);
+        
+        int channels;
+        gettextureinfo(Filename, "channels", channels);
+
+        
+        R = Col[0];
+        G = Col[1];
+        B = Col[2];
+        //A = Col[3];
+        //X = Col[4];
+        //Y = Col[5];
+
+}
