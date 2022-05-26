@@ -1,0 +1,196 @@
+void covarToEigen2D(float a, float b, float c,
+                    output float l1, output float l2,
+                    output vector v1, output vector v2)
+{
+    //2x2 covariance matrix to eigen space transformation
+    
+    //solve for this => (a b)*(v1_x v2_x) = (l1)*(v1_x v2_x)
+    //                  (b c) (v1_y v2_y) = (l2)*(v1_y v2_y)
+
+    //del is the discriminate
+    float del = sqrt(a*a+4*b*b-2*a*c+c*c);
+
+    //solve for eigenvalues
+    l1 = .5*(a+c+del);
+    l2 = .5*(a+c-del);
+
+    //two eigenvectors v1, v2, corresponding to l1, l2, respectively
+    v1=vector(0);
+    v1[1] = 1;
+    v1[0] = (l1-c)/b;
+    v1 = normalize(v1);
+
+    v2=vector(0);
+    v2[1] = 1;
+    v2[0] = (l2-c)/b;
+    v2 = normalize(v2);
+}
+
+
+void partialDeriv(point Q, float a, float b,
+                  output vector dQda, output vector dQdb)
+{
+    vector dQdx = Dx(Q);
+    vector dQdy = Dy(Q);
+
+    float A = Dx(a);
+    float B = Dx(b);
+    float C = Dy(a);
+    float D = Dy(b);
+
+    float invdet = 1/(A*D - B*C);
+    
+    dQda = (dQdx*D-dQdy*B)*invdet;
+    dQdb = (dQdy*A-dQdx*C)*invdet;
+}
+
+vector projectToNormal(vector Norm, vector Vin)
+{
+    //input Norm and Vin at both expected to be normalized at input.
+    vector Vout;
+    
+    vector VNtan = Norm*dot(Vin,Norm);  //component of Vin that is tangent to Norm;
+    Vout = Vin-VNtan;                   //subtract out such that Vin is orthogonal to Norm
+    normalize(Vout);
+    return Vout;
+}
+
+shader Bump2Roughness
+(
+
+    string filename = "/mnt/projects/rnd_sandbox/dev/roughnessfrombump/base/shots/geo/a.makeev/Stone_Wall_vlswfjc_4K_surface_ms/vlswfjc_4K_Displacement_b2r.exr.tex",
+    float frequency = 1,
+    float rotation = 0,
+    float baseRoughness = 0.001,
+    float bumpNormalGain = 1,
+    float anisotropyGain = 1,
+    float gain = 1,
+    float s = 0,
+    float t = 0,
+    int invertBumpNormal = 0,
+
+
+    output vector resultBumpNormal = normal(0),
+    
+    output float resultRoughness = 0,
+    
+    output float resultAnisotropy = 0,
+    
+    output vector resultAnisotropyDirection = vector(0),
+    
+    output float resultHeightMap = 0,
+
+
+)
+{
+     
+        float inputS = s; 
+
+        float inputT = -t; //invert T as in compiled shader on default
+        float textureFilterScale;
+        color deriv1; color deriv2;
+
+        point QT = rotate(point(inputS,inputT,0),radians(rotation),point(0,0,0),point(0,0,1)) * frequency;
+        inputS = QT[0];
+        inputT = QT[1];
+        
+
+
+        float mys = inputS;
+        float myt = inputT;
+                
+        vector pPps, pPpt;
+        partialDeriv(P, mys, myt, pPps, pPpt);
+
+        point p = point(inputS,inputT,0);
+        float ulookup = p[0];
+        float vlookup = 1.0 - p[1]; 
+                            
+        int ch;
+        string filter = "smartcubic";
+        float blur = 2;
+
+        ch = 0;
+        float dx  = texture(filename, ulookup, vlookup, "firstchannel", ch, "interp", filter, "width", blur);       
+        ch = 1;
+        float dy = texture(filename, ulookup, vlookup, "firstchannel", ch, "interp", filter, "width", blur);    
+        ch = 2;
+        float dxdx  = texture(filename, ulookup, vlookup, "firstchannel", ch, "interp", filter, "width", blur);    
+        ch = 3;
+        float dydy = texture(filename, ulookup, vlookup, "firstchannel", ch, "interp", filter, "width", blur);    
+        ch = 4;
+        float dxdy  = texture(filename, ulookup, vlookup, "firstchannel", ch, "interp", filter, "width", blur);    
+
+        if (invertBumpNormal == 0){
+            dx = -dx;
+            dy = -dy;
+        }
+        vector PN = cross(pPps,pPpt);
+        
+        int lefthanded = 0; 
+        if (dot(PN,Ng)<0) {
+            lefthanded = 1;
+        }
+        
+        PN = normalize(N);
+        if (lefthanded==1) PN = -PN;
+        pPps = normalize(cross(pPpt,PN));
+        pPpt = cross(PN,pPps);
+
+        //tangent space;
+        if (lefthanded==0) resultBumpNormal = vector(dx*bumpNormalGain, dy*bumpNormalGain, 1);
+        else resultBumpNormal = vector(dx*bumpNormalGain, dy*bumpNormalGain, -1);
+        
+        resultBumpNormal = pPps*resultBumpNormal[0] 
+                         + pPpt*resultBumpNormal[1]
+                         + PN*resultBumpNormal[2];      //project into P space;
+        resultBumpNormal = normalize(resultBumpNormal);
+        
+        /* core LEADR/Bump Roughness Logic */
+        float vargain = gain * gain;
+        float sxx = 2*vargain*(dxdx - dx*dx);
+        float sxy = 2*vargain*(dxdy - dx*dy);
+        float syy = 2*vargain*(dydy - dy*dy);
+
+        float l1, l2;
+        vector v1, v2;
+
+        covarToEigen2D(sxx, sxy, syy, l1, l2, v1, v2);
+
+        vector _pPpu = -pPps*v1[0]+pPpt*v1[1];
+        vector _pPpv = -pPps*v2[0]+pPpt*v2[1];
+
+        float base_roughsqr = baseRoughness*baseRoughness;
+
+        float varianceU = l1+base_roughsqr;
+        float varianceV = l2+base_roughsqr;
+        
+        // add a little value so we don't get div by zero errors
+        float resultRoughnessU = sqrt(varianceU)+1e-12;
+        float resultRoughnessV = sqrt(varianceV)+1e-12;
+        
+        float rudivrv = resultRoughnessU/resultRoughnessV;
+        resultAnisotropy = (rudivrv-1.0)/(rudivrv+1.0);
+
+        if (anisotropyGain != 1.0){
+            resultAnisotropy = clamp(resultAnisotropy*anisotropyGain, 
+                                     0.0, 1.0);
+        
+            float _alpha = 1.0/(resultAnisotropy*resultAnisotropy-
+                                2.0*resultAnisotropy+2.0);
+        
+            float variance = varianceU+varianceV;
+            varianceU = variance * _alpha;
+            varianceV = variance *(1.0-_alpha);
+            
+            resultRoughnessU = sqrt(varianceU);
+            resultRoughnessV = sqrt(varianceV);
+        }            
+        resultRoughness           = resultRoughnessU/(1+resultAnisotropy);
+        resultAnisotropyDirection = _pPpu;
+        resultHeightMap           = deriv1[0];//not used
+        
+
+
+    
+}
